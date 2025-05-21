@@ -83,8 +83,22 @@ dataset. To use it:
 2. Run the first cell to install dependencies.
 3. Execute the second cell to start the training loop.
 
-This example works on grayscale images and can be adapted to other black and
-white datasets by editing the configuration file.
+To train on your own grayscale dataset place the images in
+`./data/bwfolder/train` and `./data/bwfolder/test` and use the
+`bwfolder` configuration:
+
+```bash
+!python run.py --config bwfolder --name my_bw_exp --epochs 1 --eval 1 --check 1
+```
+
+After training you can generate images with:
+
+```bash
+!python eval.py --config bwfolder --name my_bw_exp --epochs 1 --eval 1 --generate 64
+```
+
+The provided `bwfolder.yml` configuration simply loads images from an
+`ImageFolder` style directory and performs unconditional generation.
 
 ## Examples
 

@@ -90,7 +90,8 @@ image_datasets = [
     "CELEBA_HQ",
     "LSUN",
     "FFHQ",
-    'TINYIMAGENET'
+    'TINYIMAGENET',
+    'BWFOLDER'
 ]
 
 toy_datasets = [
@@ -478,17 +479,35 @@ def get_dataset(p):
 
             )
 
-        dataset = TinyImageNetDataset(root_dir=os.path.join(DATA_PATH, 'tiny-imagenet-200'), 
-                                      mode='train', 
+        dataset = TinyImageNetDataset(root_dir=os.path.join(DATA_PATH, 'tiny-imagenet-200'),
+                                      mode='train',
                                       transform=transform,
                                       download=False,
                                       preload=False)
-        test_dataset = TinyImageNetDataset(root_dir=os.path.join(DATA_PATH, 'tiny-imagenet-200'), 
-                                      mode='test', 
+        test_dataset = TinyImageNetDataset(root_dir=os.path.join(DATA_PATH, 'tiny-imagenet-200'),
+                                      mode='test',
                                       transform=transform,
                                       download=False,
                                       preload=False)
         #train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+    elif config.data.dataset == 'BWFOLDER':
+        bw_path = getattr(config.data, 'path', 'bwfolder')
+        transform_list = [transforms.Resize(config.data.image_size)]
+        if config.data.random_flip:
+            transform_list.append(transforms.RandomHorizontalFlip(p=0.5))
+        transform_list.extend([
+            transforms.ToTensor(),
+            transforms.Lambda(affine_transform)
+        ])
+        transform = transforms.Compose(transform_list)
+        dataset = ImageFolder(
+            root=os.path.join(DATA_PATH, bw_path, 'train'),
+            transform=transform,
+        )
+        test_dataset = ImageFolder(
+            root=os.path.join(DATA_PATH, bw_path, 'test'),
+            transform=transform,
+        )
     else:
         dataset, test_dataset = None, None
 
