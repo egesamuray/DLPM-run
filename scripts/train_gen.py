@@ -74,28 +74,28 @@ print("✔  training done.")
 # ── unconditional generation ─────────────────────────────────────
 print(f"\n🟢  Generating {args.generate} samples …\n")
 gen_man = exp.manager.eval.gen_manager
-device  = exp.manager.device
 
-if getattr(exp.manager, "ema_objects", None):       # prefer EMA
-    ema0   = exp.manager.ema_objects[0]
-    models = {n: ema0[n].get_ema_model().eval().to(device)
-              for n in exp.manager.models}
-    print("Using EMA weights.")
+# Select EMA weights if available
+if getattr(exp.manager, "ema_objects", None):
+    ema = exp.manager.ema_objects[0]
+    models = {k: ema[k].get_ema_model().to(device).eval() for k in exp.manager.models}
 else:
-    models = {n: m.eval().to(device)
-              for n, m in exp.manager.models.items()}
-    print("Using final raw weights.")
+    models = {k: m.to(device).eval() for k, m in exp.manager.models.items()}
 
+# ---------------------------------------------------------------------
+#  Disable gradients during sampling  ◄ NEW
+# ---------------------------------------------------------------------
 with torch.no_grad():
-    gen_man.generate(models,
-                     args.generate,
-                     reverse_steps=args.steps,
+    gen_man.generate(models, args.generate,
                      deterministic=False,
-                     print_progression=args.progress)
+                     reverse_steps=args.steps,
+                     print_progression=True)
 
-png = ROOT / f"samples_{args.name}_{args.generate}.png"
-tvu.save_image(gen_man.samples, png,
-               nrow=max(1, int(math.sqrt(args.generate))),
-               normalize=True, value_range=(-1, 1))
-print("✔  samples saved →", png.resolve())
-print("\n🎉  Finished.\n")
+# ---------------------------------------------------------------------
+#  Save as 0‑1 PNG (do **not** renormalise)  ◄ NEW
+# ---------------------------------------------------------------------
+grid_rows = max(1, int(math.sqrt(args.generate)))
+out_png   = ROOT / f"samples_{args.generate}.png"
+tvu.save_image(gen_man.samples, out_png, nrow=grid_rows)
+
+print(f"✔  samples saved → {out_png.resolve()}\n🎉  Done.")
