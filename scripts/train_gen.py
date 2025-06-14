@@ -9,10 +9,10 @@ import os
 import sys
 from pathlib import Path
 
-# Stub out pyemd to avoid installation issues.
+# pyemd kütüphanesini ve numpy uyumsuzluk hatasını atlamak için
 try:
     import pyemd
-except ImportError:
+except (ImportError, ValueError):
     sys.modules["pyemd"] = type("pyemd", (), {"emd": None})()
 
 import torch
@@ -32,10 +32,10 @@ def main():
     parser = argparse.ArgumentParser(description="Train DLPM and generate samples.")
     parser.add_argument("--name", type=str, default="seismic_exp_safe", help="Name of the experiment.")
     parser.add_argument("--config", type=str, default="seismic_rect_safe.yml", help="Name of the config file to use.")
-    parser.add_argument("--epochs", type=int, default=1500, help="Number of epochs to train for.")
-    parser.add_argument("--batch_size", type=int, default=16, help="Batch size for training.")
-    parser.add_argument("--generate", type=int, default=16, help="Number of samples to generate after training.")
-    parser.add_argument("--steps", type=int, default=1000, help="Number of reverse diffusion steps for generation.")
+    parser.add_argument("--epochs", type=int, default=500, help="Number of epochs to train for.")
+    parser.add_argument("--batch_size", type=int, default=4, help="Batch size for training.")
+    parser.add_argument("--generate", type=int, default=4, help="Number of samples to generate after training.")
+    parser.add_argument("--steps", type=int, default=250, help="Number of reverse diffusion steps for generation.")
     parser.add_argument("--progress", action="store_true", help="Show progress bars for training and sampling.")
     args = parser.parse_args()
 
@@ -44,10 +44,9 @@ def main():
     params = FileHandler.get_param_from_config(config_dir, args.config)
     print(f"✔ Loaded config: {args.config}")
 
-    # --- THIS IS THE KEY CHANGE ---
     # Patch config to enable random cropping for robust training
-    params["data"]["image_size"] = 256 # The model sees 256x256
-    params["data"]["random_crop"] = True # Activate random cropping
+    params["data"]["image_size"] = 256
+    params["data"]["random_crop"] = True
     print("✔ Enabled random 256x256 cropping for training.")
     
     # Other patches for this specific run
@@ -69,7 +68,10 @@ def main():
         reset_models=dlpm_exp.reset_models
     )
     exp.prepare()
-    print("✔ Experiment prepared. Using device:", exp.manager.device)
+    # --- DÜZELTME 1 ---
+    # Cihaz bilgisine doğru yoldan ulaşıyoruz: exp.utils.p['device']
+    device = exp.utils.p['device']
+    print(f"✔ Experiment prepared. Using device: {device}")
 
     # --- Training ---
     print(f"\n🟢 Training for {args.epochs} epochs…\n")
@@ -91,7 +93,8 @@ def main():
             print("Using final model weights for generation.")
             models = exp.manager.models
 
-        device = exp.manager.device
+        # --- DÜZELTME 2 ---
+        # Cihaz bilgisini döngü içinde kullanmak için en başta aldığımız 'device' değişkenini kullanıyoruz
         for name, model in models.items():
             model.to(device).eval()
         
@@ -122,4 +125,5 @@ def main():
     print("\n🎉 Done – training and sampling completed.\n")
 
 if __name__ == "__main__":
+    main()
     main()
