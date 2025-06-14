@@ -50,7 +50,7 @@ def main():
     n_train, n_test = prepare_data(args.dataset_dir)
     print(f"Prepared {n_train} training images and {n_test} test images.")
 
-    cmd = ["python", "train_gen.py",
+    cmd = ["python", "scripts/train_gen.py",
            "--config", args.config,
            "--name", args.name,
            "--epochs", str(args.epochs),

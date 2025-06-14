@@ -24,7 +24,7 @@ python scripts/train_seismic.py --dataset_dir processed_images --progress
 By default the script uses the recommended parameters:
 
 ```bash
-python train_gen.py \
+python scripts/train_gen.py \
     --config seismic_rect_safe.yml \
     --name seismic_exp_safe \
     --epochs 1500 \
@@ -34,5 +34,5 @@ python train_gen.py \
     --progress
 ```
 
-All arguments of `train_gen.py` can be overridden from the command line. Pass
+All arguments of `scripts/train_gen.py` can be overridden from the command line. Pass
 `--help` for the full list of options.
