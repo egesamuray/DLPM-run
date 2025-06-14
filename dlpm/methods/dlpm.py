@@ -63,7 +63,8 @@ class DLPM:
         isotropic = True, # isotropic levy noise
         clamp_a = None,
         clamp_eps = None,
-        scale = 'scale_preserving'
+        scale = 'scale_preserving',
+        input_scaling = False
     ):
         self.alpha = alpha
         self.device = device
@@ -71,6 +72,7 @@ class DLPM:
         self.isotropic = isotropic
         self.use_single_a_chain = True
         self.scale = scale
+        self.input_scaling = input_scaling
 
         # 1d noising schedules
         self.gammas, self.bargammas, self.sigmas, self.barsigmas = \
@@ -282,16 +284,18 @@ class DLPM:
         g, bg, s, bs = self.update_constants(x_t.shape)
         t = self.get_t_to_batch_size(x_t, t)
         nonzero_mask = (t != 1).float().view(-1, *([1] * (len(x_t.shape) - 1))) # no noise when t == 1
+        
+        # Corrected calculation for the sample mean
+        mean_pred = (x_t - bs[t] * eps) / g[t]
+        
         if eta == 0.0:
-            sample = (x_t - bs[t]*eps) / g[t] + bs[t-1]*eps
+            sample = mean_pred + bs[t-1]*eps
             return sample, 0
         
         sigma_t = eta * bs[t-1]
 
-        sample = (x_t - bs[t]*eps) / g[t]
-        sample += (bs[t-1]**(self.alpha) - sigma_t**(self.alpha))**(1 / self.alpha)*eps
-        mean = sample
-
+        sample = mean_pred + (bs[t-1]**(self.alpha) - sigma_t**(self.alpha))**(1 / self.alpha) * eps
+        
         variance = nonzero_mask * sigma_t**2 * self.A[t]
 
         return sample, variance
@@ -412,4 +416,3 @@ class DLPM:
     #     t = self.get_t_to_batch_size(Xbatch, t)
     #     a_t_1, a_t_prime, a_t = self.get_noises_to_incoming_batch_dims(Xbatch, t)
     #     return g, bg, t, a_t_1, a_t_prime, a_t
-
