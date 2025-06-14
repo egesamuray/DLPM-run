@@ -280,24 +280,37 @@ class DLPM:
         return x_t_1, Sigma_t_1
 
 
-    def anterior_mean_variance_dlim(self, x_t, t, eps, eta = 0.0):
+    def anterior_mean_variance_dlim(self, x_t, t, eps, eta: float = 0.0):
+        """
+        One‑step reverse update used by DDIM‑style sampling.
+        Returns (sample_{t‑1}, Σ̃_{t‑1}).
+        """
         g, bg, s, bs = self.update_constants(x_t.shape)
         t = self.get_t_to_batch_size(x_t, t)
-        nonzero_mask = (t != 1).float().view(-1, *([1] * (len(x_t.shape) - 1))) # no noise when t == 1
-        
-        # Corrected calculation for the sample mean
+        nonzero_mask = (t != 1).float().view(-1, *([1] * (x_t.dim() - 1)))  # NEW
+
+        # Mean part (shared by deterministic & stochastic cases)
         mean_pred = (x_t - bs[t] * eps) / g[t]
-        
+
+        # -----------------------------------------------------------------------
+        # Deterministic path (η = 0): DDIM update
+        # -----------------------------------------------------------------------
         if eta == 0.0:
-            sample = mean_pred + bs[t-1]*eps
-            return sample, 0
-        
-        sigma_t = eta * bs[t-1]
+            # NEW — mask the noise term so that no noise is added when t == 1
+            sample = mean_pred + nonzero_mask * bs[t - 1] * eps      # NEW
+            return sample, torch.zeros_like(mean_pred)               # variance = 0
 
-        sample = mean_pred + (bs[t-1]**(self.alpha) - sigma_t**(self.alpha))**(1 / self.alpha) * eps
-        
-        variance = nonzero_mask * sigma_t**2 * self.A[t]
+        # -----------------------------------------------------------------------
+        # Stochastic path (η > 0)
+        # -----------------------------------------------------------------------
+        sigma_t = eta * bs[t - 1]
 
+        # NEW — identical masking logic for the stochastic noise
+        noise_coeff = nonzero_mask * ((bs[t - 1] ** self.alpha - sigma_t ** self.alpha)
+                                      ** (1.0 / self.alpha))        # NEW
+        sample = mean_pred + noise_coeff * eps                       # NEW
+
+        variance = nonzero_mask * (sigma_t ** 2) * self.A[t]
         return sample, variance
 
 
