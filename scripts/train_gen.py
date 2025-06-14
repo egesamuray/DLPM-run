@@ -1,138 +1,125 @@
+#!/usr/bin/env python3
 """
-Standalone training and generation script for DLPM on 512x256 seismic images.
-
-This script is designed to be fully self-contained. Drop it into the root
-of the DLPM-run repository and execute it to train a model and generate
-samples based on the specified configuration.
-
-Example usage:
-  python scripts/train_gen.py --config seismic_rect_safe.yml --epochs 50 --generate 16
-
-The script handles:
-- Loading the DLPM configuration.
-- Setting up the experiment using the BEM framework.
-- Disabling evaluation during training to focus on generation.
-- Running the training loop for a specified number of epochs.
-- Saving the final model checkpoint.
-- Generating unconditional samples using the trained model.
-- Saving the generated samples to a PNG file.
+Standalone training and generation script for DLPM.
+This script is designed to be called by `train_seismic.py`.
 """
-
-import math
-import sys
 import argparse
-import subprocess
+import math
+import os
+import sys
 from pathlib import Path
 
-# Stub out pyemd to avoid installation issues if not needed for evaluation
-# This is a workaround for a potential NumPy-ABI clash on some systems.
+# Stub out pyemd to avoid installation issues.
 try:
     import pyemd
 except ImportError:
     sys.modules["pyemd"] = type("pyemd", (), {"emd": None})()
 
 import torch
-import torch.hub
 import torchvision.utils as tvu
 
-# Ensure local modules (bem, dlpm) are prioritized in the path
+# Ensure local modules (bem, dlpm) are in the Python path
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import bem.Experiments as Exp
-import bem.utils_exp as utils
+from bem.utils_exp import FileHandler
 import dlpm.dlpm_experiment as dlpm_exp
 
-# --- Main Execution ---
-if __name__ == "__main__":
+def main():
     # --- Argument Parsing ---
-    parser = argparse.ArgumentParser(
-        description="Train DLPM and generate samples."
-    )
-    parser.add_argument("--name", type=str, default="seismic_exp_safe",
-                        help="Name of the experiment.")
-    parser.add_argument("--config", type=str, default="seismic_rect_safe.yml",
-                        help="Name of the config file to use.")
-    parser.add_argument("--epochs", type=int, default=50,
-                        help="Number of epochs to train for.")
-    parser.add_argument("--batch_size", type=int, default=8,
-                        help="Batch size for training.")
-    parser.add_argument("--generate", type=int, default=16,
-                        help="Number of samples to generate after training.")
-    parser.add_argument("--steps", type=int, default=1000,
-                        help="Number of reverse diffusion steps for generation.")
-    parser.add_argument("--progress", action="store_true",
-                        help="Show progress bars for training and sampling.")
+    parser = argparse.ArgumentParser(description="Train DLPM and generate samples.")
+    parser.add_argument("--name", type=str, default="seismic_exp_safe", help="Name of the experiment.")
+    parser.add_argument("--config", type=str, default="seismic_rect_safe.yml", help="Name of the config file to use.")
+    parser.add_argument("--epochs", type=int, default=1500, help="Number of epochs to train for.")
+    parser.add_argument("--batch_size", type=int, default=16, help="Batch size for training.")
+    parser.add_argument("--generate", type=int, default=16, help="Number of samples to generate after training.")
+    parser.add_argument("--steps", type=int, default=1000, help="Number of reverse diffusion steps for generation.")
+    parser.add_argument("--progress", action="store_true", help="Show progress bars for training and sampling.")
     args = parser.parse_args()
 
     # --- Configuration Loading and Patching ---
-    config_path = ROOT / "dlpm" / "configs" / args.config
-    params = utils.load_yaml(config_path)
-    print(f"✔  Loaded config: {args.config}")
+    config_dir = ROOT / "dlpm" / "configs"
+    params = FileHandler.get_param_from_config(config_dir, args.config)
+    print(f"✔ Loaded config: {args.config}")
 
-    # Patch config for this specific run:
-    # Disable evaluation, set epochs, and other script-specific overrides.
-    params["run"]["eval_freq"]        = None  # No evaluation during training
-    params["run"]["checkpoint_freq"]  = args.epochs + 1 # Save only final model
-    params["run"]["n_epochs"]         = args.epochs
-    params["training"]["batch_size"]  = args.batch_size
-    params["exp"]["name"]             = args.name
-    params["run"]["neptune_args"]["enabled"] = False # Disable online logging
-
+    # --- THIS IS THE KEY CHANGE ---
+    # Patch config to enable random cropping for robust training
+    params["data"]["image_size"] = 256 # The model sees 256x256
+    params["data"]["random_crop"] = True # Activate random cropping
+    print("✔ Enabled random 256x256 cropping for training.")
+    
+    # Other patches for this specific run
+    params["run"]["eval_freq"] = None
+    params["run"]["checkpoint_freq"] = args.epochs + 1
+    params["run"]["epochs"] = args.epochs
+    params["run"]["progress"] = args.progress
+    params["training"]["batch_size"] = args.batch_size
+    params["eval"]["dlpm"]["reverse_steps"] = args.steps
+    
     # --- Experiment Setup ---
-    # The BEM framework handles model, optimizer, and data loader setup.
-    # We provide DLPM-specific hooks to correctly initialize the method.
     exp = Exp.Experiment(
-        init_method=dlpm_exp.init_method_by_parameter,
-        init_models=dlpm_exp.init_models_by_parameter,
-        init_optimizers=dlpm_exp.init_optimizers_by_parameter,
-        init_schedulers=dlpm_exp.init_schedulers_by_parameter,
         checkpoint_dir=ROOT / "models" / args.name,
-        **params,
+        p=params,
+        logger=None,
+        exp_hash=dlpm_exp.exp_hash,
+        init_method_by_parameter=dlpm_exp.init_method_by_parameter,
+        init_models_by_parameter=dlpm_exp.init_models_by_parameter,
+        reset_models=dlpm_exp.reset_models
     )
     exp.prepare()
-    print("✔  Experiment prepared. Using device:", exp.manager.device)
+    print("✔ Experiment prepared. Using device:", exp.manager.device)
 
-    # --- Training Phase ---
-    print(f"\n🟢  Training for {args.epochs} epochs…\n")
+    # --- Training ---
+    print(f"\n🟢 Training for {args.epochs} epochs…\n")
     exp.run(no_ema_eval=True, progress=args.progress)
-    exp.save(exp.manager.epoch, is_best=False) # Save final checkpoint
-    print("✔  Training complete. Final checkpoint saved.")
+    exp.save(curr_epoch=exp.manager.epochs)
+    print("✔ Training complete. Final checkpoint saved.")
 
-    # --- Generation Phase ---
-    print(f"\n🟢  Generating {args.generate} samples…\n")
-    gen_man = exp.manager.eval.gen_manager
+    # --- Generation and Stitching ---
+    if args.generate > 0:
+        print(f"\n🟢 Generating {args.generate * 2} patches to create {args.generate} final 512x256 images…\n")
+        patches_to_generate = args.generate * 2
+        gen_man = exp.manager.eval.gen_manager
 
-    # Choose EMA weights if present, otherwise use the final raw model weights.
-    if getattr(exp.manager, "ema_objects", None):
-        print("Using EMA weights for generation.")
-        ema0 = exp.manager.ema_objects[0]
-        models = {n: ema0[n].get_ema_model() for n in exp.manager.models}
-    else:
-        print("Using final model weights for generation.")
-        models = {n: m for n, m in exp.manager.models.items()}
+        if exp.manager.ema_objects:
+            print("Using EMA weights for generation.")
+            ema_obj = exp.manager.ema_objects[0]
+            models = {name: ema_helper.get_ema_model() for name, ema_helper in ema_obj.items() if name != 'eval'}
+        else:
+            print("Using final model weights for generation.")
+            models = exp.manager.models
 
-    # Move models to the correct device and set to evaluation mode.
-    device = exp.manager.device
-    models = {name: model.to(device).eval() for name, model in models.items()}
+        device = exp.manager.device
+        for name, model in models.items():
+            model.to(device).eval()
+        
+        with torch.no_grad():
+            gen_man.generate(
+                models,
+                n_samples=patches_to_generate,
+                deterministic=False,
+                reverse_steps=args.steps,
+                print_progression=args.progress,
+            )
+        print(f"✔ Generated {patches_to_generate} individual 256x256 patches.")
 
-    # Disable gradient tracking for efficiency during the sampling loop.
-    with torch.no_grad():
-        gen_man.generate(
-            models,
-            args.generate,
-            deterministic=False,
-            reverse_steps=args.steps,
-            print_progression=args.progress,
-        )
+        print("\n🟢 Stitching patches into 512x256 images…")
+        stitched_images = []
+        for i in range(0, patches_to_generate, 2):
+            patch_left = gen_man.samples[i]
+            patch_right = gen_man.samples[i + 1]
+            stitched_image = torch.cat([patch_left, patch_right], dim=2)
+            stitched_images.append(stitched_image)
 
-    # Save the generated samples to a grid image.
-    # The GenerationManager automatically handles the inverse transform,
-    # so the samples are already in the [0, 1] range. No further normalization needed.
-    nrow = max(1, int(math.sqrt(args.generate)))
-    out_png = Path(f"samples_{args.name}_{args.generate}.png")
-    tvu.save_image(gen_man.samples, out_png, nrow=nrow)
-    print("✔  Samples saved →", out_png.resolve())
+        final_output = torch.stack(stitched_images)
+        nrow = max(1, int(math.sqrt(args.generate)))
+        out_png = ROOT / f"samples_{args.name}_{args.epochs}epochs_512x256.png"
+        tvu.save_image(final_output, out_png, nrow=nrow)
+        print("✔ Stitched samples saved to:", out_png.resolve())
 
-    print("\n🎉  Done – training and sampling completed.\n")
+    print("\n🎉 Done – training and sampling completed.\n")
+
+if __name__ == "__main__":
+    main()
