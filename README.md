@@ -85,43 +85,12 @@ python ./eval.py --config mnist --name dlpm_test --method dlpm --epochs 100 --ev
 - `--generate`: Number of samples to generate.
 - `--reverse_steps`: Number of reverse steps to use during the generation process.
 
-## Running in Google Colab
+## Training on Custom Grayscale Data
 
-A minimal notebook is provided in `notebooks/colab_mnist_train.ipynb`. It
-installs the required packages and launches a small training run on the MNIST
-dataset. To use it:
-
-1. Open the notebook with Google Colab.
-2. Run the first cell to install dependencies.
-3. Execute the second cell to start the training loop.
-
-To train on your own grayscale dataset place the images in
-`./data/bwfolder/train` and `./data/bwfolder/test` and use the
-`bwfolder` configuration:
-
-```bash
-!python run.py --config bwfolder --name my_bw_exp --epochs 1 --eval 1 --check 1
-```
-
-After training you can generate images with:
-
-```bash
-!python eval.py --config bwfolder --name my_bw_exp --epochs 1 --eval 1 --generate 64
-```
-
-The provided `bwfolder.yml` configuration simply loads images from an
-`ImageFolder` style directory and performs unconditional generation.
-
-To work with 256×512 grayscale images you can use the `seismic_rect.yml`
-configuration. Place your dataset under `./data/seismic_velocity/train` and
-`./data/seismic_velocity/test` then run:
-
-```bash
-!python train_seismic.py
-```
-
-This script loads the configuration and launches training with the new loader
-handling rectangular images.
+Place your 512×256 PNG images in a folder and use the helper script
+`scripts/train_seismic.py` to prepare the dataset and launch training. The
+script converts the images to grayscale, splits them into training and test
+sets and calls `train_gen.py` with the recommended parameters.
 
 For convenience the `scripts/train_seismic.py` utility can prepare your PNG
 images and launch the recommended training run in one command:
