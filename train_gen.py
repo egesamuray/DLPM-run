@@ -1,81 +1,54 @@
 #!/usr/bin/env python3
 """
-train_gen.py  –  train a DLPM model **without** any evaluation stack,
-                 then sample <N> unconditional 512×256 grayscale images.
+train_gen.py – Train a DLPM model (with evaluation *disabled*) and
+               sample N unconditional 512×256 grayscale images.
 
-The script is 100 % standalone – no edits elsewhere are required.
+Fully standalone – drop into DLPM-run root and run.
 """
 
-import os, sys, argparse, types, importlib, pathlib
+# ───────────────────────── Imports & CLI ─────────────────────────
+import argparse, math, os, pathlib, sys, types, torch, torchvision.utils as tvu
 
-# ───────────────────────────── CLI ────────────────────────────────
-ap = argparse.ArgumentParser()
-ap.add_argument("--config",   default="seismic_rect_safe.yml",
-                help="YAML file inside dlpm/configs/")
-ap.add_argument("--name",     default="seismic_exp_safe",
-                help="folder under models/ for checkpoints / samples")
-ap.add_argument("--epochs",   type=int, default=100)
-ap.add_argument("--batch",    type=int, default=4)
-ap.add_argument("--generate", type=int, default=64,
-                help="number of images to sample after training")
-ap.add_argument("--steps",    type=int, default=1000,
-                help="reverse_steps for DLPM sampling")
-ap.add_argument("--progress", action="store_true")
-args = ap.parse_args()
+P = argparse.ArgumentParser()
+P.add_argument("--config",   default="seismic_rect_safe.yml",
+               help="YAML file in dlpm/configs/")
+P.add_argument("--name",     default="seismic_exp_safe",
+               help="sub-folder under models/ for checkpoints + samples")
+P.add_argument("--epochs",   type=int, default=100)
+P.add_argument("--batch",    type=int, default=4)
+P.add_argument("--generate", type=int, default=64)
+P.add_argument("--steps",    type=int, default=1000)
+P.add_argument("--progress", action="store_true")
+args = P.parse_args()
 
 ROOT = pathlib.Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT))                # make local packages importable
+sys.path.insert(0, str(ROOT))           # local pkgs first
 os.environ.setdefault("NEPTUNE_MODE", "offline")
 os.environ.setdefault("NEPTUNE_DISABLE_TELEMETRY", "1")
 
-# ── 1.  STUB-OUT **EVERY** EVALUATION IMPORT (pyemd, bem.evaluate…) ──
-def _make_dummy(mod_name: str) -> types.ModuleType:
-    dummy = types.ModuleType(mod_name)
-    dummy.__dict__["__file__"] = "<stub>"
-    return dummy
-
-# pyemd causes the NumPy-ABI crash – nuke it up-front
+# ── 1. stub out *only* pyemd (NumPy-ABI clash) ───────────────────
+def _make_dummy(name):
+    m = types.ModuleType(name)
+    m.__file__ = "<stub>"
+    return m
 sys.modules["pyemd"] = _make_dummy("pyemd")
 
-# create hela dummy package chain bem.evaluate.EvaluationManager
-eval_pkg = _make_dummy("bem.evaluate")
-eval_pkg.__path__ = []                 # marks it as a *package*
-eval_mgr_mod = _make_dummy("bem.evaluate.EvaluationManager")
-
-class _NoEval:                         # placeholder class never called
-    def __init__(self,*_,**__): pass
-    def __getattr__(self,*_):  return self
-    def __call__(self,*_,**__): return self
-eval_mgr_mod.EvaluationManager = _NoEval
-
-# register in sys.modules **before** anything imports bem
-sys.modules.update({
-    "bem.evaluate":                 eval_pkg,
-    "bem.evaluate.EvaluationManager": eval_mgr_mod,
-})
-# link sub-module to parent so `import .evaluate.EvaluationManager` works
-setattr(eval_pkg, "EvaluationManager", eval_mgr_mod)
-
-# ── 2.  STANDARD DLPM IMPORTS  (safe now) ─────────────────────────
-import yaml
-import bem.Experiments as Exp           # no ImportError any more
-from bem.utils_exp import FileHandler   # uses our stubs happily
+# ── 2. DLPM imports (safe now) ───────────────────────────────────
+import bem.Experiments as Exp
+from bem.utils_exp import FileHandler
 import dlpm.dlpm_experiment as dlpm_exp
 
-# ── 3.  LOAD & PATCH CONFIG  ───────────────────────────────────────
-cfg_path = ROOT / "dlpm" / "configs" / args.config
-params   = FileHandler.get_param_from_config(cfg_path.parent, cfg_path.name)
+# ── 3. Load & patch config (turn evaluation off) ─────────────────
+cfg = ROOT / "dlpm" / "configs" / args.config
+params = FileHandler.get_param_from_config(cfg.parent, cfg.name)
 
-# 100 % disable evaluation during training
-params["run"]["eval_freq"]       = None
-# checkpoint only once at the very end
-params["run"]["checkpoint_freq"] = args.epochs + 1
+params["run"]["eval_freq"]        = None            # disable FID/KID/EMD
+params["run"]["checkpoint_freq"]  = args.epochs + 1 # save only final
+params["run"]["epochs"]           = args.epochs
+params["training"]["batch_size"]  = args.batch
+params["training"]["num_workers"] = params["training"].get("num_workers", 0)
 
-params["run"]["epochs"]                  = args.epochs
-params["training"]["batch_size"]         = args.batch
-params["training"]["num_workers"]        = params["training"].get("num_workers", 0)
-
-# ── 4.  BUILD EXPERIMENT  ──────────────────────────────────────────
+# ── 4. Build experiment ──────────────────────────────────────────
 exp = Exp.Experiment(
         checkpoint_dir = ROOT / "models" / args.name,
         p              = params,
@@ -88,28 +61,41 @@ exp = Exp.Experiment(
 
 exp.prepare()
 
+# ── 5. Train ─────────────────────────────────────────────────────
 print(f"\n🟢  Training for {args.epochs} epochs …\n")
-# exp.run provides the needed checkpoint callback internally
 exp.run(no_ema_eval=True, progress=args.progress)
 
-ckpt_path = exp.save(curr_epoch=args.epochs)
-print("✔  final checkpoint written to", ckpt_path)
+ckpt = exp.save(curr_epoch=args.epochs)
+print("✔  final checkpoint written to", ckpt)
 
-# ── 5.  UNCONDITIONAL GENERATION  ──────────────────────────────────
+# ── 6. Unconditional generation (EMA weights) ────────────────────
 print(f"\n🟢  Generating {args.generate} samples …\n")
 
-# DLPM already created a GenerationManager at  exp.manager.gen_manager
-gen_man   = exp.manager.gen_manager
-models    = exp.manager.models          # dict of torch.nn.Module
-# generation itself – **no metrics** are computed
+gen_man = exp.manager.eval.gen_manager      # ← real GenerationManager
+
+# choose EMA weights if present
+if getattr(exp.manager, "ema_objects", None):
+    ema0   = exp.manager.ema_objects[0]     # mu ≈ 0.9999
+    models = {n: ema0[n].get_ema_model().eval()
+              for n in exp.manager.models}
+else:
+    models = {n: m.eval() for n, m in exp.manager.models.items()}
+
+device = "cuda" if torch.cuda.is_available() else "cpu"
+for m in models.values():
+    m.to(device)
+
 gen_man.generate(models, args.generate,
+                 deterministic=False,
                  reverse_steps=args.steps,
-                 deterministic=False)    # use default sampler
+                 print_progression=True)
 
-# save to <script-folder>/samples_<N>.png
-out_path = ROOT / f"samples_{args.generate}.png"
-import torchvision.utils as tvu
-tvu.save_image(gen_man.samples, out_path, nrow=8, normalize=True, value_range=(-1,1))
-print("✔  samples saved →", out_path.resolve())
+# grid save
+nrow = max(1, int(math.sqrt(args.generate)))
+out_png = ROOT / f"samples_{args.generate}.png"
+tvu.save_image(gen_man.samples, out_png,
+               nrow=nrow, normalize=True, value_range=(-1, 1))
+print("✔  samples saved →", out_png.resolve())
 
-print("\n🎉  Done – training + sampling completed without evaluation stack.\n")
+print("\n🎉  Done – training + sampling completed.\n")
+
