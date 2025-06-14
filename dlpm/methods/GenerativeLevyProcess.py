@@ -87,7 +87,8 @@ class GenerativeLevyProcess:
                         diffusion_steps=reverse_steps,
                         time_spacing = time_spacing,
                         isotropic = isotropic,
-                        scale=scale)
+                        scale=scale,
+                        input_scaling=input_scaling)
     
     def _scale_timesteps(self, t):
         if self.rescale_timesteps:
@@ -175,7 +176,7 @@ class GenerativeLevyProcess:
         
         # run model
         input_scaling = 1.0
-        if self.input_scaling and (self.dlpm.scale == 'scale_exploding'):
+        if self.dlpm.input_scaling and (self.dlpm.scale == 'scale_exploding'):
             input_scaling = match_last_dims(1 / (1+self.dlpm.barsigmas[t]), x.shape)
         model_output = model(x * input_scaling,  self._scale_timesteps(t), **model_kwargs)
 
@@ -233,7 +234,7 @@ class GenerativeLevyProcess:
             denoised_fn=denoised_fn,
             model_kwargs=model_kwargs,
         )
-        noise = th.randn_like(x)
+        noise = self.dlpm.gen_eps.generate(size = x.shape)
         nonzero_mask = ((t != 1).float().view(-1, *([1] * (len(x.shape) - 1))))  # no noise when t == 1
         sample = out["mean"] + nonzero_mask * torch.sqrt(out["variance"]) * noise
         return {"sample": sample}#, "xstart": out["xstart"]}
@@ -359,8 +360,10 @@ class GenerativeLevyProcess:
         if eta == 0.0:
             return {"sample": model_mean}
 
-        sample = model_mean + torch.sqrt(model_variance)*torch.randn_like(x)
-        return {"sample": sample}#, "xstart": out["xstart"]}
+        # Use alpha-stable noise instead of Gaussian
+        noise = self.dlpm.gen_eps.generate(size=x.shape)
+        sample = model_mean + torch.sqrt(model_variance) * noise
+        return {"sample": sample}
 
     def ddim_sample_loop(
         self,
@@ -656,7 +659,7 @@ class GenerativeLevyProcess:
 
         # run model
         input_scaling = 1.0
-        if self.input_scaling and (self.dlpm.scale == 'scale_exploding'):
+        if self.dlpm.input_scaling and (self.dlpm.scale == 'scale_exploding'):
             input_scaling = match_last_dims(1 / (1+self.dlpm.barsigmas[t_extended]), x_t.shape)
         model_eps = model(x_t * input_scaling,  self._scale_timesteps(t_extended), **model_kwargs)
         
