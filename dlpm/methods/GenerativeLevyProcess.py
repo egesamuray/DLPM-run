@@ -335,34 +335,28 @@ class GenerativeLevyProcess:
         model,
         x,
         t,
-        clip_denoised=False,
-        denoised_fn=None,
-        model_kwargs=None,
-        eta=0.0,
+        clip_denoised: bool = False,
+        denoised_fn     = None,
+        model_kwargs    = None,
+        eta: float      = 0.0,
     ):
         """
-        Sample x_{t-1} from the model using DDIM.
-        Same usage as p_sample().
+        Single DDIM reverse step.
         """
-
-        out = self.p_mean_variance(
-            model,
-            x,
-            t,
-            clip_denoised=clip_denoised,
-            denoised_fn=denoised_fn,
-            model_kwargs=model_kwargs,
+        out_sample, out_var = self.dlpm.anterior_mean_variance_dlim(
+            x, t,                                    # uses our patched function
+            eps=self.p_mean_variance(model, x, t)["eps"],
+            eta=eta,
         )
-        eps = out['eps']
-        model_mean, model_variance = self.dlpm.anterior_mean_variance_dlim(x, t, eps, eta=eta)
-        assert not torch.isnan(model_mean).any() # verify no nan
-        # deterministic sampling
-        if eta == 0.0:
-            return {"sample": model_mean}
 
-        # Use alpha-stable noise instead of Gaussian
-        noise = self.dlpm.gen_eps.generate(size=x.shape)
-        sample = model_mean + torch.sqrt(model_variance) * noise
+        if eta == 0.0:
+            return {"sample": out_sample}            # deterministic path
+
+        # ---------------------------------------------------------------
+        # Stochastic path (η > 0): use α‑stable noise, not Gaussian   ◄ NEW
+        # ---------------------------------------------------------------
+        noise = self.dlpm.gen_eps.generate(size=x.shape)  # NEW
+        sample = out_sample + torch.sqrt(out_var) * noise
         return {"sample": sample}
 
     def ddim_sample_loop(
