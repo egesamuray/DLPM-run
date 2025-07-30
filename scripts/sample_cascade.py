@@ -2,7 +2,10 @@ import argparse, os
 import torch as th
 import numpy as np
 from improved_diffusion import dist_util, logger
-from improved_diffusion.wavelet_datasets import wavelet_to_image, wavelet_stats
+from improved_diffusion.wavelet_datasets import (
+    wavelet_to_image_singlechannel as wavelet_to_image,
+    wavelet_stats_singlechannel as wavelet_stats,
+)
 from improved_diffusion.script_util import (
     model_and_diffusion_defaults,
     create_model_and_diffusion,
