@@ -12,7 +12,11 @@ import torch as th
 import torch.distributed as dist
 
 from improved_diffusion import dist_util, logger
-from improved_diffusion.wavelet_datasets import load_data_wavelet, wavelet_to_image, wavelet_stats
+from improved_diffusion.wavelet_datasets import (
+    load_data_wavelet,
+    wavelet_to_image_singlechannel as wavelet_to_image,
+    wavelet_stats_singlechannel as wavelet_stats,
+)
 from improved_diffusion.script_util import (
     NUM_CLASSES,
     model_and_diffusion_defaults,
