@@ -29,3 +29,17 @@ When run, the `run_exps.py` file launches experiments for training and sampling 
 
 Once all models have been trained and 30,000 samples have been generated with several number of discretization steps, run `python get_fid.py` to compute FIDs for every setting. If different, you will need to provide the correct path for the training datasets.
 
+### Seismic conditional models
+
+We include helper scripts for grayscale seismic images of size 256x256. The
+training script runs all scales in a cascade and the sampling script generates
+images from the learned cascade.
+
+```
+python scripts/train_cascade.py --data_dir PATH/TO/WAVELET/DATA --j 3
+python scripts/sample_cascade.py --model_root logs/cascade --j 3
+```
+
+Checkpoints are written to `logs/cascade/scale{j}` and samples are saved in the
+same directory after sampling.
+

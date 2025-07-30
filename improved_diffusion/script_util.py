@@ -44,6 +44,7 @@ def model_and_diffusion_defaults(task="standard"):
         use_checkpoint=False,
         use_scale_shift_norm=True,
         learn_potential=False,
+        conditioning_channels=3,
     )
 
 
@@ -73,6 +74,7 @@ def create_model_and_diffusion(
     use_checkpoint,
     use_scale_shift_norm,
     learn_potential,
+    conditioning_channels,
 ):
     model = create_model(
         task=task,
@@ -91,6 +93,7 @@ def create_model_and_diffusion(
         use_scale_shift_norm=use_scale_shift_norm,
         dropout=dropout,
         learn_potential=learn_potential,
+        conditioning_channels=conditioning_channels,
     )
     diffusion = create_gaussian_diffusion(
         steps=diffusion_steps,
@@ -123,6 +126,7 @@ def create_model(
     use_scale_shift_norm,
     dropout,
     learn_potential,
+    conditioning_channels,
 ):
     _ = small_size  # hack to prevent unused variable
 
@@ -167,7 +171,7 @@ def create_model(
         learn_potential=learn_potential,
     )
     if task == "wavelet" and conditional:
-        kwargs.update(in_channels=9, conditioning_channels=3)
+        kwargs.update(in_channels=9, conditioning_channels=conditioning_channels)
     kwargs.update(out_channels=kwargs["in_channels"] * (2 if learn_sigma else 1))
 
     return model(**kwargs)
