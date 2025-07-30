@@ -310,7 +310,28 @@ def wavelet_stats(j, dir_name):
         else:
             assert False
     else:
-        assert False
+        # Fallback for unknown datasets: compute statistics on the fly and
+        # cache them next to the dataset. dir_name is a path to a first npz
+        # file, hence we look in its parent directory for a cached stats file.
+        stats_dir = os.path.dirname(dir_name)
+        stats_file = os.path.join(stats_dir, f"stats_j{j}.npz")
+        if os.path.exists(stats_file):
+            stats = np.load(stats_file)
+            mean = torch.from_numpy(stats["mean"]).float()
+            std = torch.from_numpy(stats["std"]).float()
+        else:
+            files = [os.path.join(stats_dir, f) for f in os.listdir(stats_dir)
+                     if f.endswith('.npz') and 'stats' not in f]
+            means, stds = [], []
+            for f in tqdm.tqdm(files, desc=f"computing stats j{j}"):
+                arr = np.load(f)[f"j{j}"]
+                means.append(arr.mean(axis=(1, 2)))
+                stds.append(arr.std(axis=(1, 2)))
+            mean = np.mean(means, axis=0)
+            std = np.mean(stds, axis=0)
+            np.savez(stats_file, mean=mean, std=std)
+            mean = torch.from_numpy(mean).float()
+            std = torch.from_numpy(std).float()
     return mean, std
 
 
@@ -375,6 +396,8 @@ def image_to_wavelets(img_fname, J, wavelet, border_condition):
     the 3 next are for the G channel, etc. The last 3 channels are the low-frequencies.
     """
     with Image.open(img_fname) as im:
+        # Convert to RGB so that grayscale images have 3 channels.
+        im = im.convert("RGB")
         img_array = np.moveaxis(np.array(im), -1, 0)
 
     rets = []  # j -> coeffs (Nj, Nj, 12)
